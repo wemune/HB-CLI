@@ -2,7 +2,7 @@ import 'dotenv/config';
 import inquirer from 'inquirer';
 import SteamUser from 'steam-user';
 import * as db from './config/db';
-import { log } from './config/logger';
+import log from './config/logger';
 import fs from 'fs';
 import path from 'path';
 
@@ -34,12 +34,12 @@ async function getAppList(): Promise<SteamApp[]> {
     }
 
     if (isCacheValid) {
-        log('Loading Steam app list from cache...');
+        log.info('Loading Steam app list from cache...');
         const fileContent = fs.readFileSync(APP_LIST_CACHE_PATH, 'utf-8');
         appListCache = JSON.parse(fileContent);
         return appListCache!;
     } else {
-        log('Fetching updated Steam app list from API...');
+        log.info('Fetching updated Steam app list from API...');
         try {
             const response = await fetch(APP_LIST_API_URL);
             if (!response.ok) {
@@ -48,12 +48,12 @@ async function getAppList(): Promise<SteamApp[]> {
             const data = await response.json() as { applist: { apps: SteamApp[] } };
             appListCache = data.applist.apps;
             fs.writeFileSync(APP_LIST_CACHE_PATH, JSON.stringify(appListCache));
-            log('App list updated and cached.');
+            log.info('App list updated and cached.');
             return appListCache!;
         } catch (e: any) {
-            log(`Error fetching app list: ${e.message}`);
+            log.error(`Error fetching app list: ${e.message}`);
             if (cacheExists) {
-                log('Using stale cache as a fallback.');
+                log.info('Using stale cache as a fallback.');
                 const fileContent = fs.readFileSync(APP_LIST_CACHE_PATH, 'utf-8');
                 appListCache = JSON.parse(fileContent);
                 return appListCache!;
@@ -71,7 +71,7 @@ async function resolveGameIds(input: string): Promise<number[]> {
     if (items.length === 0) return [];
 
     const appList = await getAppList();
-    log(`Resolving app IDs for: ${items.join(', ')}`);
+    log.info(`Resolving app IDs for: ${items.join(', ')}`);
 
     for (const item of items) {
         if (/^\d+$/.test(item)) {
@@ -80,9 +80,9 @@ async function resolveGameIds(input: string): Promise<number[]> {
             const foundApp = appList.find(app => app.name.toLowerCase() === item);
             if (foundApp) {
                 ids.push(foundApp.appid);
-                log(`Resolved "${item}" to appid ${foundApp.appid}`);
+                log.info(`Resolved "${item}" to appid ${foundApp.appid}`);
             } else {
-                log(`Could not resolve "${item}" to an appid.`);
+                log.warn(`Could not resolve "${item}" to an appid.`);
             }
         }
     }
@@ -100,7 +100,7 @@ async function addAccount() {
     ]);
 
     const client = new SteamUser();
-    log(`Attempting to log in as ${answers.username} to get refresh token...`);
+    log.info(`Attempting to log in as ${answers.username} to get refresh token...`);
 
     client.logOn({
         accountName: answers.username,
@@ -117,16 +117,16 @@ async function addAccount() {
     });
 
     client.on('error', (err) => {
-        log(`Failed to get refresh token: ${err.message}`);
+        log.error(`Failed to get refresh token: ${err.message}`);
         mainMenu();
     });
 
     client.on('loggedOn', () => {
-        log('Successfully logged on, waiting for refresh token...');
+        log.info('Successfully logged on, waiting for refresh token...');
     });
 
     client.on('refreshToken', async (token) => {
-        log('New refresh token received. Saving account...');
+        log.info('New refresh token received. Saving account...');
         const games = await resolveGameIds(answers.games);
         db.saveAccount({
             username: answers.username,
@@ -137,7 +137,7 @@ async function addAccount() {
             auto_restarter: answers.auto_restarter,
             refreshToken: token
         });
-        log(`Account for ${answers.username} has been saved successfully.`);
+        log.info(`Account for ${answers.username} has been saved successfully.`);
         process.exit(0);
     });
 }
@@ -145,7 +145,7 @@ async function addAccount() {
 async function editAccount() {
     const accounts = db.getAccounts();
     if (accounts.length === 0) {
-        console.log('No accounts to edit.');
+        log.info('No accounts to edit.');
         return;
     }
 
@@ -187,16 +187,16 @@ async function editAccount() {
 
     if (Object.keys(editFields).length > 0) {
         db.editAccount(username, editFields);
-        console.log('Account updated successfully.');
+        log.info('Account updated successfully.');
     } else {
-        console.log('No changes were made.');
+        log.info('No changes were made.');
     }
 }
 
 async function removeAccount() {
     const accounts = db.getAccounts();
     if (accounts.length === 0) {
-        console.log('No accounts to remove.');
+        log.info('No accounts to remove.');
         return;
     }
 
@@ -216,9 +216,9 @@ async function removeAccount() {
 
     if (confirm) {
         db.deleteAccount(username);
-        console.log('Account removed successfully.');
+        log.info('Account removed successfully.');
     } else {
-        console.log('Account removal cancelled.');
+        log.info('Account removal cancelled.');
     }
 }
 
