@@ -107,13 +107,33 @@ function startBoosting(acc: db.Account, idx: number): void {
 
     client.on('error', (err: Error & { eresult?: EResult }) => {
         const entry = clients.get(acc.username);
-        if (entry) entry.isLoggingIn = false;
+        if (entry) {
+            entry.isLoggingIn = false;
+        }
 
         logger.error(`${logPrefix} Error: ${err.message}`, err);
 
+        if (err.eresult === SteamUser.EResult.LoggedInElsewhere) {
+            client.logOff();
+            clients.delete(acc.username);
+
+            if (acc.auto_restarter) {
+                logger.info(`${logPrefix} Logged in elsewhere detected. Starting 45-minute wait before retrying.`);
+                setTimeout(() => {
+                    logger.info(`${logPrefix} 45 minutes have passed. Attempting to log in again.`);
+                    startBoosting(acc, idx);
+                }, 45 * 60 * 1000);
+            } else {
+                logger.info(`${logPrefix} Logged in elsewhere detected. Auto-restart is disabled, so not retrying.`);
+            }
+            return;
+        }
+
         if (err.eresult === SteamUser.EResult.AccountLoginDeniedThrottle) {
             logger.warn(`${logPrefix} Login throttled. Auto-restart disabled for this session.`);
-            if (entry) acc.auto_restarter = false;
+            if (entry) {
+                acc.auto_restarter = false;
+            }
         }
     });
 
@@ -121,28 +141,16 @@ function startBoosting(acc: db.Account, idx: number): void {
         const entry = clients.get(acc.username);
         const eresultString = SteamUser.EResult[eresult] || 'Unknown';
         logger.info(`${logPrefix} Disconnected from Steam. EResult: ${eresultString} (${eresult}), Msg: ${msg}`);
-        clients.delete(acc.username);
 
-        if (eresult === SteamUser.EResult.LoggedInElsewhere) {
-            logger.info(`${logPrefix} Logged in elsewhere detected. Starting 45-minute wait before retrying.`);
-            setTimeout(() => {
-                logger.info(`${logPrefix} 45 minutes have passed. Attempting to log in again.`);
-                startBoosting(acc, idx);
-            }, 45 * 60 * 1000);
+        if (!entry) {
             return;
         }
 
+        clients.delete(acc.username);
+
         if (acc.auto_restarter) {
             logger.info(`${logPrefix} Auto-restarting in 10 seconds...`);
-            const timeout = setTimeout(() => startBoosting(acc, idx), 10000);
-            clients.set(acc.username, {
-                client,
-                acc,
-                idx,
-                isLoggingIn: false,
-                autoRestartTimeout: timeout,
-                isWaitingOnElsewhere: false
-            });
+            setTimeout(() => startBoosting(acc, idx), 10000);
         }
     });
 }
