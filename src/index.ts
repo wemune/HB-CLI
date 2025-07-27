@@ -1,7 +1,36 @@
 import 'dotenv/config';
+import logger from './config/logger';
+
+// Graceful shutdown and error handling
+process.on('uncaughtException', (error) => {
+    logger.error('UNCAUGHT EXCEPTION:', error);
+    process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    logger.error('UNHANDLED REJECTION:', reason);
+    promise.catch(err => logger.error('REJECTION CATCH:', err));
+    setTimeout(() => process.exit(1), 2000);
+});
+
+function gracefulShutdown() {
+    logger.info('Shutting down gracefully...');
+    const allClients = Array.from(clients.keys());
+    if (allClients.length === 0) {
+        process.exit(0);
+    }
+    allClients.forEach(username => stopBoosting(username));
+    setTimeout(() => {
+        logger.info('Graceful shutdown complete.');
+        process.exit(0);
+    }, 2000);
+}
+
+process.on('SIGINT', gracefulShutdown);
+process.on('SIGTERM', gracefulShutdown);
+
 import SteamUser, { EResult } from 'steam-user';
 import * as db from './config/db';
-import { log } from './config/logger';
 
 const clients = new Map<string, {
     client: SteamUser,
@@ -15,7 +44,7 @@ const clients = new Map<string, {
 function stopBoosting(username: string): void {
     const entry = clients.get(username);
     if (entry) {
-        log(`[Account ${entry.idx}] Logging off ${username}`);
+        logger.info(`[Account ${entry.idx}] Logging off ${username}`);
         if (entry.autoRestartTimeout) {
             clearTimeout(entry.autoRestartTimeout);
         }
@@ -26,7 +55,7 @@ function stopBoosting(username: string): void {
 
 function startBoosting(acc: db.Account, idx: number): void {
     if (clients.has(acc.username)) {
-        log(`[Account ${idx}] Login attempt for ${acc.username} is already in progress.`);
+        logger.info(`[Account ${idx}] Login attempt for ${acc.username} is already in progress.`);
         return;
     }
 
@@ -46,13 +75,13 @@ function startBoosting(acc: db.Account, idx: number): void {
 
     if (acc.refreshToken) {
         logOnOptions = { refreshToken: acc.refreshToken };
-        log(`${logPrefix} Logging in as ${acc.username} using refresh token.`);
+        logger.info(`${logPrefix} Logging in as ${acc.username} using refresh token.`);
     } else {
         logOnOptions = {
             accountName: acc.username,
             password: acc.password
         };
-        log(`${logPrefix} Logging in as ${acc.username} using password (refresh token not available).`);
+        logger.info(`${logPrefix} Logging in as ${acc.username} using password (refresh token not available).`);
     }
 
     client.logOn(logOnOptions);
@@ -61,17 +90,17 @@ function startBoosting(acc: db.Account, idx: number): void {
         const entry = clients.get(acc.username);
         if (entry) entry.isLoggingIn = false;
 
-        log(`${logPrefix} Logged in as ${acc.username}`);
+        logger.info(`${logPrefix} Logged in as ${acc.username}`);
         client.setPersona(acc.appear_offline ? SteamUser.EPersonaState.Offline : SteamUser.EPersonaState.Online);
-        log(`${logPrefix} Set status to ${acc.appear_offline ? 'Offline' : 'Online'}`);
+        logger.info(`${logPrefix} Set status to ${acc.appear_offline ? 'Offline' : 'Online'}`);
 
         const gamesToPlay = acc.custom_title ? [acc.custom_title, ...acc.games] : acc.games;
         client.gamesPlayed(gamesToPlay);
-        log(`${logPrefix} Boosting games: ${JSON.stringify(gamesToPlay)}`);
+        logger.info(`${logPrefix} Boosting games: ${JSON.stringify(gamesToPlay)}`);
     });
 
     client.on('refreshToken', (token) => {
-        log(`${logPrefix} Received new refresh token for ${acc.username}.`);
+        logger.info(`${logPrefix} Received new refresh token for ${acc.username}.`);
         db.updateRefreshToken(acc.username, token);
         acc.refreshToken = token;
     });
@@ -80,10 +109,10 @@ function startBoosting(acc: db.Account, idx: number): void {
         const entry = clients.get(acc.username);
         if (entry) entry.isLoggingIn = false;
 
-        log(`${logPrefix} Error: ${err.message}`);
+        logger.error(`${logPrefix} Error: ${err.message}`, err);
 
         if (err.eresult === SteamUser.EResult.AccountLoginDeniedThrottle) {
-            log(`${logPrefix} Login throttled. Auto-restart disabled for this session.`);
+            logger.warn(`${logPrefix} Login throttled. Auto-restart disabled for this session.`);
             if (entry) acc.auto_restarter = false;
         }
     });
@@ -91,20 +120,20 @@ function startBoosting(acc: db.Account, idx: number): void {
     client.on('disconnected', (eresult, msg) => {
         const entry = clients.get(acc.username);
         const eresultString = SteamUser.EResult[eresult] || 'Unknown';
-        log(`${logPrefix} Disconnected from Steam. EResult: ${eresultString} (${eresult}), Msg: ${msg}`);
+        logger.info(`${logPrefix} Disconnected from Steam. EResult: ${eresultString} (${eresult}), Msg: ${msg}`);
         clients.delete(acc.username);
 
         if (eresult === SteamUser.EResult.LoggedInElsewhere) {
-            log(`${logPrefix} Logged in elsewhere detected. Starting 45-minute wait before retrying.`);
+            logger.info(`${logPrefix} Logged in elsewhere detected. Starting 45-minute wait before retrying.`);
             setTimeout(() => {
-                log(`${logPrefix} 45 minutes have passed. Attempting to log in again.`);
+                logger.info(`${logPrefix} 45 minutes have passed. Attempting to log in again.`);
                 startBoosting(acc, idx);
             }, 45 * 60 * 1000);
             return;
         }
 
         if (acc.auto_restarter) {
-            log(`${logPrefix} Auto-restarting in 10 seconds...`);
+            logger.info(`${logPrefix} Auto-restarting in 10 seconds...`);
             const timeout = setTimeout(() => startBoosting(acc, idx), 10000);
             clients.set(acc.username, {
                 client,
@@ -124,7 +153,7 @@ function updateBoosting(newAccounts: db.Account[]): void {
 
     for (const username of currentAccounts.keys()) {
         if (!newAccountsMap.has(username)) {
-            log(`Account ${username} removed from database. Stopping boost.`);
+            logger.info(`Account ${username} removed from database. Stopping boost.`);
             stopBoosting(username);
         }
     }
@@ -134,7 +163,7 @@ function updateBoosting(newAccounts: db.Account[]): void {
         const oldAcc = currentAccounts.get(newAcc.username);
 
         if (!existingClient) {
-            log(`New account ${newAcc.username} found in database. Starting boost.`);
+            logger.info(`New account ${newAcc.username} found in database. Starting boost.`);
             startBoosting(newAcc, idx + 1);
         } else if (oldAcc) {
             const needsRestart = oldAcc.password !== newAcc.password ||
@@ -144,7 +173,7 @@ function updateBoosting(newAccounts: db.Account[]): void {
                 oldAcc.custom_title !== newAcc.custom_title;
 
             if (needsRestart) {
-                log(`Configuration for ${newAcc.username} has changed. Restarting boost.`);
+                logger.info(`Configuration for ${newAcc.username} has changed. Restarting boost.`);
                 stopBoosting(newAcc.username);
                 startBoosting(newAcc, idx + 1);
             }
@@ -153,17 +182,16 @@ function updateBoosting(newAccounts: db.Account[]): void {
 }
 
 async function main() {
-    log('Starting Steam Hour Booster...');
+    logger.info('Starting Steam Hour Booster...');
     let accounts: db.Account[];
     try {
         accounts = db.getAccounts();
     } catch (e: any) {
-        log('CRITICAL: Failed to load accounts from the database. The file may be corrupted, unreadable, or was created with a different encryption key.');
-        log(`Underlying error: ${e.message}`);
+        logger.error('CRITICAL: Failed to load accounts from the database. The file may be corrupted, unreadable, or was created with a different encryption key.', e);
         process.exit(1);
     }
 
-    log(`Loaded ${accounts.length} accounts from the database.`);
+    logger.info(`Loaded ${accounts.length} accounts from the database.`);
     updateBoosting(accounts);
 
     let lastAccountsJson = JSON.stringify(accounts);
@@ -172,30 +200,14 @@ async function main() {
             const newAccounts = db.getAccounts();
             const newAccountsJson = JSON.stringify(newAccounts);
             if (newAccountsJson !== lastAccountsJson) {
-                log('Database has changed. Reloading and applying changes...');
+                logger.info('Database has changed. Reloading and applying changes...');
                 updateBoosting(newAccounts);
                 lastAccountsJson = newAccountsJson;
             }
         } catch (e: any) {
-            log(`Error polling for account changes: ${e.message}`);
+            logger.error(`Error polling for account changes: ${e.message}`, e);
         }
     }, 5000);
 }
-
-function gracefulShutdown() {
-    log('Shutting down gracefully...');
-    const allClients = Array.from(clients.keys());
-    if (allClients.length === 0) {
-        process.exit(0);
-    }
-    allClients.forEach(username => stopBoosting(username));
-    setTimeout(() => {
-        log('Graceful shutdown complete.');
-        process.exit(0);
-    }, 2000);
-}
-
-process.on('SIGINT', gracefulShutdown);
-process.on('SIGTERM', gracefulShutdown);
 
 main();
