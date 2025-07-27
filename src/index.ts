@@ -82,7 +82,7 @@ function startBoosting(acc: db.Account, idx: number): void {
 
         log(`${logPrefix} Error: ${err.message}`);
 
-        if (err.eresult === EResult.AccountLoginDeniedThrottle) {
+        if (err.eresult === SteamUser.EResult.AccountLoginDeniedThrottle) {
             log(`${logPrefix} Login throttled. Auto-restart disabled for this session.`);
             if (entry) acc.auto_restarter = false;
         }
@@ -90,11 +90,11 @@ function startBoosting(acc: db.Account, idx: number): void {
 
     client.on('disconnected', (eresult, msg) => {
         const entry = clients.get(acc.username);
-        const eresultString = EResult[eresult] || 'Unknown';
+        const eresultString = SteamUser.EResult[eresult] || 'Unknown';
         log(`${logPrefix} Disconnected from Steam. EResult: ${eresultString} (${eresult}), Msg: ${msg}`);
         clients.delete(acc.username);
 
-        if (eresult === EResult.LoggedInElsewhere) {
+        if (eresult === SteamUser.EResult.LoggedInElsewhere) {
             log(`${logPrefix} Logged in elsewhere detected. Starting 45-minute wait before retrying.`);
             setTimeout(() => {
                 log(`${logPrefix} 45 minutes have passed. Attempting to log in again.`);
