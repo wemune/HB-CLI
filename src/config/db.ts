@@ -36,14 +36,14 @@ export function getAccounts(): Account[] {
             return {
                 ...acc,
                 password: acc.password ? decrypt(acc.password) : undefined,
-                games: acc.games ? JSON.parse(decrypt(acc.games)) : [],
-                custom_title: acc.custom_title ? decrypt(acc.custom_title) : null,
+                games: acc.games ? JSON.parse(acc.games) : [],
+                custom_title: acc.custom_title || null,
                 appear_offline: !!acc.appear_offline,
                 auto_restarter: !!acc.auto_restarter,
                 refreshToken: acc.refresh_token ? decrypt(acc.refresh_token) : null
             };
         } catch (e) {
-            log(`Could not decrypt account data for ${acc.username}. It may be corrupted or from an old, unencrypted database. Skipping.`);
+            log(`Could not process account data for ${acc.username}. It may be corrupted or from an old, encrypted database. You may need to edit and re-save it. Skipping.`);
             return null;
         }
     }).filter((acc): acc is Account => acc !== null);
@@ -63,8 +63,8 @@ export function saveAccount(account: Omit<Account, 'id'>): void {
     `).run({
         username: account.username,
         password: account.password ? encrypt(account.password) : null,
-        games: encrypt(JSON.stringify(account.games)),
-        custom_title: account.custom_title ? encrypt(account.custom_title) : null,
+        games: JSON.stringify(account.games),
+        custom_title: account.custom_title || null,
         appear_offline: account.appear_offline ? 1 : 0,
         auto_restarter: account.auto_restarter ? 1 : 0,
         refreshToken: account.refreshToken ? encrypt(account.refreshToken) : null
@@ -91,8 +91,7 @@ export function editAccount(username: string, updates: Partial<Account>): void {
         let dbValue: any = value;
 
         if (key === 'password' && typeof value === 'string') dbValue = encrypt(value);
-        if (key === 'games' && Array.isArray(value)) dbValue = encrypt(JSON.stringify(value));
-        if (key === 'custom_title' && typeof value === 'string') dbValue = encrypt(value);
+        if (key === 'games' && Array.isArray(value)) dbValue = JSON.stringify(value);
         if (key === 'refreshToken' && typeof value === 'string') dbValue = encrypt(value);
         
         if (key === 'refreshToken') dbKey = 'refresh_token';
@@ -122,3 +121,5 @@ process.on('exit', () => db.close());
 process.on('SIGHUP', () => process.exit(128 + 1));
 process.on('SIGINT', () => process.exit(128 + 2));
 process.on('SIGTERM', () => process.exit(128 + 15));
+
+
