@@ -32,20 +32,31 @@ export interface Account {
 export function getAccounts(): Account[] {
     const rows = db.prepare('SELECT * FROM accounts').all() as any[];
     return rows.map(acc => {
+        let password, refreshToken;
         try {
-            return {
-                ...acc,
-                password: acc.password ? decrypt(acc.password) : undefined,
-                games: acc.games ? JSON.parse(acc.games) : [],
-                custom_title: acc.custom_title || null,
-                appear_offline: !!acc.appear_offline,
-                auto_restarter: !!acc.auto_restarter,
-                refreshToken: acc.refresh_token ? decrypt(acc.refresh_token) : null
-            };
+            password = acc.password ? decrypt(acc.password) : undefined;
+            refreshToken = acc.refresh_token ? decrypt(acc.refresh_token) : null;
         } catch (e) {
-            log(`Could not process account data for ${acc.username}. It may be corrupted or from an old, encrypted database. You may need to edit and re-save it. Skipping.`);
+            log(`Could not decrypt sensitive data for ${acc.username}. The account may be corrupted. Skipping.`);
             return null;
         }
+
+        let games: number[] = [];
+        try {
+            games = acc.games ? JSON.parse(acc.games) : [];
+        } catch (e) {
+            log(`Could not parse games for ${acc.username}. It may be from a previous version. Defaulting to empty list.`);
+        }
+
+        return {
+            ...acc,
+            password,
+            games,
+            custom_title: acc.custom_title || null,
+            appear_offline: !!acc.appear_offline,
+            auto_restarter: !!acc.auto_restarter,
+            refreshToken
+        };
     }).filter((acc): acc is Account => acc !== null);
 }
 
