@@ -45,14 +45,21 @@ export function getAccounts(): Account[] {
         try {
             games = acc.games ? JSON.parse(acc.games) : [];
         } catch (e) {
-            log(`Could not parse games for ${acc.username}. It may be from a previous version. Defaulting to empty list.`);
+            log(`Field 'games' for account '${acc.username}' is in an old format. It will be reset. Please re-save it.`);
+            games = [];
+        }
+
+        let custom_title: string | null = acc.custom_title || null;
+        if (custom_title && custom_title.includes(':') && custom_title.length > 32) { // Basic check for encrypted format
+            log(`Field 'custom_title' for account '${acc.username}' is in an old format. It will be reset. Please re-save it.`);
+            custom_title = null;
         }
 
         return {
             ...acc,
             password,
             games,
-            custom_title: acc.custom_title || null,
+            custom_title,
             appear_offline: !!acc.appear_offline,
             auto_restarter: !!acc.auto_restarter,
             refreshToken
