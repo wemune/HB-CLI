@@ -41,6 +41,9 @@ const clients = new Map<string, {
     isWaitingOnElsewhere: boolean
 }>();
 
+const retryAttempts = new Map<string, number>();
+const MAX_RETRIES = 5;
+
 function stopBoosting(username: string): void {
     const entry = clients.get(username);
     if (entry) {
@@ -50,6 +53,7 @@ function stopBoosting(username: string): void {
         }
         entry.client.logOff();
         clients.delete(username);
+        retryAttempts.delete(username);
     }
 }
 
@@ -61,6 +65,11 @@ function startBoosting(acc: db.Account, idx: number): void {
 
     const client = new SteamUser({ renewRefreshTokens: true });
     const logPrefix = `[Account ${idx}]`;
+
+    const currentAttempt = retryAttempts.get(acc.username) || 0;
+    if (currentAttempt > 0) {
+        logger.info(`${logPrefix} Reconnect attempt ${currentAttempt}/${MAX_RETRIES}...`);
+    }
 
     clients.set(acc.username, {
         client,
@@ -89,6 +98,7 @@ function startBoosting(acc: db.Account, idx: number): void {
     client.on('loggedOn', () => {
         const entry = clients.get(acc.username);
         if (entry) entry.isLoggingIn = false;
+        retryAttempts.delete(acc.username);
 
         logger.info(`${logPrefix} Logged in as ${acc.username}`);
         client.setPersona(acc.appear_offline ? SteamUser.EPersonaState.Offline : SteamUser.EPersonaState.Online);
@@ -114,18 +124,10 @@ function startBoosting(acc: db.Account, idx: number): void {
         logger.error(`${logPrefix} Error: ${err.message}`, err);
 
         if (err.eresult === SteamUser.EResult.LoggedInElsewhere) {
-            client.logOff();
-            clients.delete(acc.username);
-
-            if (acc.auto_restarter) {
-                logger.info(`${logPrefix} Logged in elsewhere detected. Starting 45-minute wait before retrying.`);
-                setTimeout(() => {
-                    logger.info(`${logPrefix} 45 minutes have passed. Attempting to log in again.`);
-                    startBoosting(acc, idx);
-                }, 45 * 60 * 1000);
-            } else {
-                logger.info(`${logPrefix} Logged in elsewhere detected. Auto-restart is disabled, so not retrying.`);
+            if (entry && acc.auto_restarter) {
+                entry.isWaitingOnElsewhere = true;
             }
+            client.logOff();
             return;
         }
 
@@ -146,11 +148,35 @@ function startBoosting(acc: db.Account, idx: number): void {
             return;
         }
 
+        const wasWaitingOnElsewhere = entry.isWaitingOnElsewhere;
         clients.delete(acc.username);
 
         if (acc.auto_restarter) {
-            logger.info(`${logPrefix} Auto-restarting in 10 seconds...`);
-            setTimeout(() => startBoosting(acc, idx), 10000);
+            if (wasWaitingOnElsewhere) {
+                logger.info(`${logPrefix} Logged in elsewhere detected. Starting 45-minute wait before retrying.`);
+                setTimeout(() => startBoosting(acc, idx), 45 * 60 * 1000);
+                return;
+            }
+
+            if (eresult === SteamUser.EResult.Invalid) {
+                return;
+            }
+
+            const currentAttempt = (retryAttempts.get(acc.username) || 0) + 1;
+
+            if (currentAttempt > MAX_RETRIES) {
+                logger.error(`${logPrefix} Max retries reached. Stopping automatic restart.`);
+                retryAttempts.delete(acc.username);
+                return;
+            }
+
+            retryAttempts.set(acc.username, currentAttempt);
+
+            const baseDelay = 60000;
+            const delay = baseDelay * Math.pow(2, currentAttempt - 1);
+
+            logger.info(`${logPrefix} Auto-restarting in ${delay / 1000} seconds... (Attempt ${currentAttempt}/${MAX_RETRIES})`);
+            setTimeout(() => startBoosting(acc, idx), delay);
         }
     });
 }
@@ -182,6 +208,7 @@ function updateBoosting(newAccounts: db.Account[]): void {
 
             if (needsRestart) {
                 logger.info(`Configuration for ${newAcc.username} has changed. Restarting boost.`);
+                retryAttempts.delete(newAcc.username);
                 stopBoosting(newAcc.username);
                 startBoosting(newAcc, idx + 1);
             }
