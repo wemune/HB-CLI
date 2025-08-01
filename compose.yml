@@ -1,0 +1,10 @@
+services:
+  app:
+    build: .
+    image: hb-cli
+    restart: unless-stopped
+    env_file: .env
+    init: true
+    volumes:
+      - ./hb-cli.db:/app/hb-cli.db
+    command: ["npm", "start"]

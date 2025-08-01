@@ -1,0 +1,16 @@
+.git
+node_modules
+npm-debug.log
+yarn-debug.log
+pnpm-debug.log
+Dockerfile*
+docker-compose*.yml
+compose*.yml
+dist
+*.tsbuildinfo
+.env
+*.local.*
+hb-cli.db
+hb-cli.db-*
+applist.json
+hb-cli.log
