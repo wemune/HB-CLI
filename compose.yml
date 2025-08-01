@@ -7,4 +7,5 @@ services:
     init: true
     volumes:
       - ./hb-cli.db:/app/hb-cli.db
+      - ./hb-cli.log:/app/hb-cli.log
     command: ["npm", "start"]
